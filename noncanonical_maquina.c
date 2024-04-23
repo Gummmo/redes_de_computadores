@@ -82,13 +82,7 @@ int main(int argc, char** argv)
             printf("buf[%d]: %02X \n",i,buf[i]);
         }
         //enviar a mensagem UA
-        //atualizacao do buffer a ser enviado SET->UA
-        buf[0] = FLAG;
-        buf[1] = A_RECEIVER;
-        buf[2] = C_UA;
-        buf[3] = buf[1] ^ buf[2]; // BCC
-        buf[4] = FLAG;
-        res = write(fd,buf,5);
+        
         STOP = TRUE;
     }
 
@@ -161,7 +155,16 @@ while (state != STOP) {
 
         break;
     }
-}
+}       
+    //enviar o UA
+    buf[0] = FLAG;
+    buf[1] = A_RECEIVER;
+    buf[2] = C_UA;
+    buf[3] = buf[1] ^ buf[2]; // BCC
+    buf[4] = FLAG;    
+    
+    res = write(fd,buf,5);
+
     sleep(1);
     tcsetattr(fd,TCSANOW,&oldtio);
     close(fd);
