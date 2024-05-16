@@ -15,14 +15,14 @@
 volatile int STOP=FALSE;
 
 //estados da state machine
-typedef enum {
-    START,
-    FLAG_RCV,
-    A_RCV,
-    C_RCV,
-    BCC_OK,
-    STOP_Mac
-}State;
+int estado=0;
+#define START 1
+#define FLAG_RCV 2
+#define A_RCV 3
+#define C_RCV 4
+#define BCC_OK 5
+#define STOP_Mac 6
+
 //State state = START;
 //criar e atribuir os valores as diferentes variveis
 unsigned char FLAG = 0x5c;
@@ -30,106 +30,91 @@ unsigned char A_SENDER= 0x01;
 unsigned char A_RECEIVER = 0x03;
 unsigned char C_SET = 0x07;
 unsigned char C_UA = 0x06;
+// criar set
+int envia_set(int fd){
+    int res;
+
+    unsigned char buf_aux[255];
+
+    buf_aux[0]=FLAG;                       
+    buf_aux[1]=A_SENDER; //0x01
+    buf_aux[2]=C_SET;                
+    buf_aux[3]=buf_aux[1]^buf_aux[2];
+    buf_aux[4]=FLAG;                       
+    buf_aux[5] = '\n'; // talvez retirar depois
+    res = write(fd,buf_aux,5); // envia o SET
+    printf("%d bytes written\n", res);
+    return NULL;
+}
+//cria ua
+int envia_UA(int fd){
+    int res;
+
+    unsigned char buf_aux[255];
+
+    buf_aux[0]=FLAG;                               
+    buf_aux[1]=A_SENDER;      
+    buf_aux[2]=C_UA;                         
+    buf_aux[3]=buf_aux[1]^buf_aux[2];
+    buf_aux[4]=FLAG;                               
+    buf_aux[5] = '\n';
+    res = write(fd,buf_aux,5);
+    printf("%d bytes written\n", res);
+    return NULL;
+}
 
 //criar a maquina de estados para o SET
-void State_Machine_SET(unsigned char Var)
-{
-    switch (state)
-    {
+void SET_machine(unsigned char char_lido){
+    
+    switch (estado)
+        {
         case START:
-            if(Var == 0x5c) state = FLAG_RCV;
+            if(char_lido == 0x5c) estado = FLAG_RCV;
+            printf("estado 1\n");
             break;
 
         case FLAG_RCV:
-            if(Var == 0x01) state = A_RCV;
+            if(char_lido == 0x01) estado = A_RCV;
 
-            else if(Var == 0x5c) state = FLAG_RCV;
+            else if(char_lido == 0x5c) estado = FLAG_RCV;
             
-            else state = START;   
+            else estado = START;   
             break;
         
         case A_RCV:
-            if(Var== 0x07) state = C_RCV;
+            if(char_lido== 0x07) estado = C_RCV;
             
-            else if(Var == 0x5c) state = FLAG_RCV;
+            else if(char_lido == 0x5c) estado = FLAG_RCV;
             
-            else state = START;
+            else estado = START;
             break;
         
         case C_RCV:
             
-            if(Var == (0x01^0x07)) state = BCC_OK;
+            if(char_lido == (0x01^0x07)) estado = BCC_OK;
             
-            else if(Var == 0x5c) state = FLAG_RCV;
+            else if(char_lido == 0x5c) estado = FLAG_RCV;
             
-            else state = START; 
+            else estado = START; 
             break;  
         case BCC_OK:  
             
-            if(Var == 0x5c) state = STOP_Mac;
+            if(char_lido == 0x5c) estado = STOP_Mac;
             
-            else state = START;  
+            else estado = START;  
             break;
         
         default:
             printf("EXIT MAQUINA\n");
             break;
             
-    }
+        }
 }
-
-//criar maquina de estados para o UA enviado mas depois so deve estar no transmitter
-
-void State_Machine_UA_first(unsigned char Var)
-{
-    switch (state)
-    {
-        case START:
-            if(Var == 0x5c) state = FLAG_RCV;
-            break;
-
-        case FLAG_RCV:
-            if(Var == 0x01) state = A_RCV;
-
-            else if(Var == 0x5c) state = FLAG_RCV;
-            
-            else state = START;   
-            break;
-        
-        case A_RCV:
-            if(Var== 0x06) state = C_RCV;
-            
-            else if(Var == 0x5c) state = FLAG_RCV;
-            
-            else state = START;
-            break;
-        
-        case C_RCV:
-            
-            if(Var == (0x01^0x06)) state = BCC_OK;
-            
-            else if(Var == 0x5c) state = FLAG_RCV;
-            
-            else state = START; 
-            break;  
-        case BCC_OK:  
-            
-            if(Var == 0x5c) state = STOP_Mac;
-            
-            else state = START;  
-            break;
-        
-        default:
-            printf("EXIT MAQUINA\n");
-            break;
-            
-    }
-}
-
+//
 int main(int argc, char** argv)
 {
     int fd,c, res;
-    char valor;
+    char char_lido;
     struct termios oldtio,newtio;
     unsigned char buf[255];
 
@@ -157,7 +142,7 @@ int main(int argc, char** argv)
     newtio.c_lflag = 0;
 
     newtio.c_cc[VTIME]    = 0;   /* inter-character timer unused */
-    newtio.c_cc[VMIN]     = 1;   /* blocking read until 5 chars received */
+    newtio.c_cc[VMIN]     = 5;   /* blocking read until 5 chars received */
 
     tcflush(fd, TCIOFLUSH);
 
@@ -197,64 +182,30 @@ int main(int argc, char** argv)
     //res = read(fd,buf,1);   // ler um byte
 
     // maquina Estados Set
-    printf("maquina Estados Set\n");
+    printf("Maquina Estados Set\n");
     State state = START;
     while(STOP==FALSE){
-        res=read(fd,buf,1);
-        printf("0x%02x\n",buf[0]);
-        switch (state)
-        {
-        case START:
-            if(buf[0] == 0x5c) state = FLAG_RCV;
-            printf("estado 1\n");
-            break;
-
-        case FLAG_RCV:
-            if(buf[0] == 0x01) state = A_RCV;
-
-            else if(buf[0] == 0x5c) state = FLAG_RCV;
-            
-            else state = START;   
-            break;
-        
-        case A_RCV:
-            if(buf[0]== 0x07) state = C_RCV;
-            
-            else if(buf[0] == 0x5c) state = FLAG_RCV;
-            
-            else state = START;
-            break;
-        
-        case C_RCV:
-            
-            if(buf[0] == (0x01^0x07)) state = BCC_OK;
-            
-            else if(buf[0] == 0x5c) state = FLAG_RCV;
-            
-            else state = START; 
-            break;  
-        case BCC_OK:  
-            
-            if(buf[0] == 0x5c) state = STOP_Mac;
-            
-            else state = START;  
-            break;
-        
-        default:
-            printf("EXIT MAQUINA\n");
-            break;
-            
-        }
-
+        res=read(fd,&char_lido,1);
+        SET_machine(char_lido);
+        printf("Estado: %d\n",estado);
+        printf("0x%02x\n",char_lido);
+        if(estado==STOP_Mac)
+        {           
+            state=START;
+            STOP=TRUE;     
+        } 
     }
+    STOP=FALSE;
     //enviar o UA
     printf("enviar o UA\n");
-    buf[0] = FLAG;
-    buf[1] = A_RECEIVER;
-    buf[2] = C_UA;
-    buf[3] = buf[1] ^ buf[2]; // BCC
-    buf[4] = FLAG;    
-    res = write(fd,buf,5); // envia UA
+    envia_UA(fd);
+    /*unsigned char buf2[255];
+    buf2[0] = FLAG;
+    buf2[1] = 0x01; //0x03
+    buf2[2] = 0x06; //0x06
+    buf2[3] = buf[1] ^ buf[2]; // BCC
+    buf2[4] = FLAG;    
+    res = write(fd,buf2,5); // envia UA*/
 
     sleep(1);
     tcsetattr(fd,TCSANOW,&oldtio);

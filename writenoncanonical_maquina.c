@@ -6,75 +6,107 @@
 #include <stdlib.h>
 
 #define BAUDRATE B38400
-#define MODEMDEVICE "/dev/ttyS1"
+//#define MODEMDEVICE "/dev/ttyS1"
 #define _POSIX_SOURCE 1 /* POSIX compliant source */
 #define FALSE 0
 #define TRUE 1
 
 volatile int STOP=FALSE;
-
+int estado=0;
 //estados da state machine
-typedef enum {
-    START,
-    FLAG_SENDER,
-    A_SENDER,
-    C_SENDER,
-    BCC_OK,
-    STOP_Mac
-}State;
+#define START 1
+#define FLAG_RCV 2
+#define A_RCV 3
+#define C_RCV 4
+#define BCC_OK 5
+#define STOP_Mac 6
+
 //State state = START;
 //
-unsigned char FLAG = 0x5c;
+unsigned char FLAG = 0x5c; //talvez tenha que colocar #define
 unsigned char A_SENDER= 0x01;
 unsigned char A_RECEIVER = 0x03;
 unsigned char C_SET = 0x07;
 unsigned char C_UA = 0x06;
 
-//UA MACHINE
-void State_Machine_UA_first(unsigned char Var)
-{
-    switch (state)
-    {
+// criar set
+int enviar_set(int fd){
+    int res;
+
+    unsigned char buf_aux[255];
+
+    buf_aux[0]=FLAG;                       
+    buf_aux[1]=A_SENDER; //0x01
+    buf_aux[2]=C_SET;                
+    buf_aux[3]=buf_aux[1]^buf_aux[2];
+    buf_aux[4]=FLAG;                       
+    buf_aux[5] = '\n'; // talvez retirar depois
+    res = write(fd,buf_aux,5); // envia o SET
+    printf("%d bytes written\n", res);
+    return NULL;
+}
+//cria ua
+int enviar_UA(int fd){
+    int res;
+
+    unsigned char buf_aux[255];
+
+    buf_aux[0]=FLAG;                               
+    buf_aux[1]=A_SENDER;      
+    buf_aux[2]=C_UA;                         
+    buf_aux[3]=buf_aux[1]^buf_aux[2];
+    buf_aux[4]=FLAG;                               
+    buf_aux[5] = '\n';
+    res = write(fd,buf_aux,5);
+    printf("%d bytes written\n", res);
+    return NULL;
+}
+// criar maquina de estados UA
+void UA_machine(unsigned char char_lido){
+    
+        switch (estado)
+        {
         case START:
-            if(Var == 0x5c) state = FLAG_RCV;
+            if(char_lido == 0x5c) estado = FLAG_RCV;
+            printf("estado 1 \n");
             break;
 
         case FLAG_RCV:
-            if(Var == 0x01) state = A_RCV;
+            if(char_lido == 0x01) estado = A_RCV;
 
-            else if(Var == 0x5c) state = FLAG_RCV;
+            else if(char_lido == 0x5c) estado = FLAG_RCV;
             
-            else state = START;   
+            else estado = START;   
             break;
         
         case A_RCV:
-            if(Var== 0x06) state = C_RCV;
+            if(char_lido== 0x06) estado = C_RCV;
             
-            else if(Var == 0x5c) state = FLAG_RCV;
+            else if(char_lido == 0x5c) estado = FLAG_RCV;
             
-            else state = START;
+            else estado = START;
             break;
         
         case C_RCV:
             
-            if(Var == (0x01^0x06)) state = BCC_OK;
+            if(char_lido == (0x01^0x06)) estado = BCC_OK;
             
-            else if(Var == 0x5c) state = FLAG_RCV;
+            else if(char_lido == 0x5c) estado = FLAG_RCV;
             
-            else state = START; 
+            else estado = START; 
             break;  
         case BCC_OK:  
             
-            if(Var == 0x5c) state = STOP_Mac;
+            if(char_lido == 0x5c) estado = STOP_Mac;
             
-            else state = START;  
+            else estado = START;  
             break;
         
         default:
             printf("EXIT MAQUINA\n");
             break;
             
-    }
+        }
 }
 
 int main(int argc, char** argv)
@@ -82,7 +114,7 @@ int main(int argc, char** argv)
     int fd,c, res;
     struct termios oldtio,newtio;
     unsigned char buf[255];
-    char valor;
+    char char_lido;
     int i, sum = 0, speed = 0;
 
     if ( (argc < 2) ||
@@ -109,7 +141,7 @@ int main(int argc, char** argv)
     newtio.c_lflag = 0;
 
     newtio.c_cc[VTIME]    = 0;   /* inter-character timer unused */
-    newtio.c_cc[VMIN]     = 1;   /* blocking read until 5 chars received */ // professor tinha colado 1
+    newtio.c_cc[VMIN]     = 5;   /* blocking read until 5 chars received */ // professor tinha colado 1
 
     tcflush(fd, TCIOFLUSH);
 
@@ -119,66 +151,30 @@ int main(int argc, char** argv)
     }
 
     printf("New termios structure set\n");
-    //SET framo a ser enviado 
-    buf[0] = FLAG;
+    //SET framo a ser enviado  
+    printf("enviar o SET frame\n");
+    enviar_set(fd); //enviar o SET 
+   /*
+   buf[0] = FLAG;
     buf[1] = A_SENDER; //x01
     buf[2] = C_SET;    //x07
     buf[3] = buf[1] ^ buf[2]; // BCC
     buf[4] = FLAG;
-    
-    //enviar o SET 
-    printf("enviar o SET frame\n");
-    res = write(fd,buf,5);
-    printf("%d bytes written\n", res);
+   */ 
     printf("receber o UA\n");
-    State state =START;
     while(STOP==FALSE){
-        res=read(fd,buf,1);
-        printf("0x%02x\n",buf[0]);
-        switch (state)
-        {
-        case START:
-            if(buf[0] == 0x5c) state = FLAG_SENDER;
-            printf("estado 1 \n");
-            break;
-
-        case FLAG_SENDER:
-            if(buf[0] == 0x01) state = A_SENDER;
-
-            else if(buf[0] == 0x5c) state = FLAG_SENDER;
-            
-            else state = START;   
-            break;
-        
-        case A_RCV:
-            if(buf[0]== 0x06) state = C_SENDER;
-            
-            else if(buf[0] == 0x5c) state = FLAG_SENDER;
-            
-            else state = START;
-            break;
-        
-        case C_RCV:
-            
-            if(buf[0] == (0x01^0x06)) state = BCC_OK;
-            
-            else if(buf[0] == 0x5c) state = FLAG_SENDER;
-            
-            else state = START; 
-            break;  
-        case BCC_OK:  
-            
-            if(buf[0] == 0x5c) state = STOP_Mac;
-            
-            else state = START;  
-            break;
-        
-        default:
-            printf("EXIT MAQUINA\n");
-            break;
-            
-        }
+        res=read(fd,&char_lido,1);
+        UA_machine(char_lido);
+        printf("Estado: %d\n",estado);
+        printf("0x%02x\n",char_lido);
+        if(estado==STOP_Mac)
+        {           state=START;
+                    STOP=TRUE;
+                    
+                    alarm(0);           
+        } 
     }
+    STOP=FALSE;
     printf("UA RECEBIDA\n");
     sleep(1);
     if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
