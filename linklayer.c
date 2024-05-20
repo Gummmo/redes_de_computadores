@@ -188,7 +188,7 @@ void maquina_DISC_1(unsigned char char_lido)
     }
 }
 
-void maquina_ua_close(unsigned char char)
+void maquina_ua_close(unsigned char char_lido)
 {
     switch (state)
     {
@@ -258,6 +258,46 @@ void maquina_I0(unsigned char char_lido)
     }
 }
 
+unsigned char maquina_para_todos(unsigned char char_lido)
+{
+    unsigned char resultado = 0;
+    while (state != MACHINE_STOP)
+    {    
+         switch (state)
+        {
+            case START:
+                if(char_lido==0x5c) state = FLAG_RCV;
+                break;
+            case FLAG_RCV:
+                if(char_lido==0x01) state = A_RCV;
+                else if(char_lido==0x5c) state = FLAG_RCV;
+                else state = START;   
+                break;
+            case A_RCV:
+                if(char_lido==C_RR0 || char_lido==C_RR1 || char_lido==C_REJ0 ||char_lido==C_REJ1)
+                {
+                    state = C_RCV;
+                    resultado=char_lido;
+                } 
+                else if(char_lido==0x5c) state = FLAG_RCV;
+                else state = START;
+                break;
+            case C_RCV:
+                if(char_lido==0x01^resultado) state = BCC_OK;
+                else if(char_lido==0x5c) state = FLAG_RCV;
+                else state = START; 
+                break;  
+            case BCC_OK:  
+                if(char_lido==0x5c) state = MACHINE_STOP;
+                else state = START;  
+                break;
+            default:
+                printf("exit maquina\n");
+                break;
+        }
+    }
+    return resultado;
+}
 
 void maquina_I1(unsigned char char_lido)
 {
@@ -342,12 +382,12 @@ void maquina_RR1(unsigned char char_lido)
             break;
         case FLAG_RCV:
             if(char_lido==0x01) state = A_RCV;
-            else if(byte==0x5c) state = FLAG_RCV;
+            else if(char_lido==0x5c) state = FLAG_RCV;
             else state = START;   
             break;
         case A_RCV:
             if(char_lido==0x11) state = C_RCV;
-            else if(byte==0x5c) state = FLAG_RCV;
+            else if(char_lido==0x5c) state = FLAG_RCV;
             else state = START;
             break;
         case C_RCV:
@@ -469,15 +509,15 @@ int envia_ua_open(int fd){
 
 int envia_I_0(int fd, char *buf_aux, int tamanho){
     int res;
-    int n_carateres=1,i=5;
+    int n_carateres=1,i=4;
     //unsigned char buf2[10];
     char BBC2 = 0x00;
     buf_aux[0]=FLAG;                               ////0x5c
     buf_aux[1]=A_SENDER;             ////0x01
     buf_aux[2]=C_I0;                         ////0x80
     buf_aux[3]=buf_aux[1]^buf_aux[2];
-    buf_aux[4]=FLAG;                               ////0x5c    
-    while(i<(tamanho+5)){
+                                             ////0x5c    
+    while(i<(tamanho+4)){
         BBC2 = BBC2^buf_aux[i];
         if(buf_aux[i]==0x5c){
             res = write(fd,0x5d,1);
@@ -562,7 +602,7 @@ int envia_REJ_1(int fd){
     unsigned char buf_aux[255];
     buf_aux[0]=FLAG;                               ////0x5c
     buf_aux[1]=A_answers_Receiver;      
-    buf_aux[2]=CONTROL_REJ1;
+    buf_aux[2]=C_REJ1;
     buf_aux[3]=buf_aux[1]^buf_aux[2];
     buf_aux[4]=FLAG;                               ////0x5c
     res = write(fd,buf_aux,5);
@@ -575,7 +615,7 @@ int envia_REJ_0(int fd){
     unsigned char buf_aux[255];
     buf_aux[0]=FLAG;                               ////0x5c
     buf_aux[1]=A_answers_Receiver;     
-    buf_aux[2]=CONTROL_REJ0;
+    buf_aux[2]=C_REJ0;
     buf_aux[3]=buf_aux[1]^buf_aux[2];
     buf_aux[4]=FLAG;                               ////0x5c
     res = write(fd,buf_aux,5);
@@ -601,9 +641,9 @@ int envia_DISC0(int fd){
     int res;
     unsigned char buf_aux[255];
     buf_aux[0]=FLAG;                                   ////0x5c
-    buf_aux[1]=A_Sender;          ////0x03
+    buf_aux[1]=A_SENDER;          ////0x03
     buf_aux[2]=C_DISC;                           ////0x08
-    buf2[3]=buf_aux[1]^buf_aux[2];
+    buf_aux[3]=buf_aux[1]^buf_aux[2];
     buf_aux[4]=FLAG;                                   ////0x5c
     res = write(fd,buf_aux,5);
     printf("%d bytes written\n", res);
@@ -639,10 +679,10 @@ llopen(linkLayer connectionParameters){
     tentativas = 1;
 
     if ((connectionParameters.serialPort == NULL) ||
-         ((strcmp("/dev/ttyS0", connectionParameters.serialPort)!=0) &&
-          (strcmp("/dev/ttyS1", connectionParameters.serialPort)!=0) )) {
+         ((strcmp("/dev/ttyS10", connectionParameters.serialPort)!=0) &&
+          (strcmp("/dev/ttyS11", connectionParameters.serialPort)!=0) )) {
         printf("Usage:\tnserial SerialPort\n\tex: nserial /dev/ttyS1\n");
-        exit(NOT_DEFINED);      //NOT_DEFINED (-1) porque as portas não coincidem com as que deviam
+        exit(NOT_DEFINED);      
     }
     
     
@@ -656,12 +696,6 @@ llopen(linkLayer connectionParameters){
         perror("tcgetattr");
         exit(-1);
     }
-
-    bzero(&newtio, sizeof(newtio));
-    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
-    newtio.c_iflag = IGNPAR;
-    newtio.c_oflag = 0;
-
     /* set input mode (non-canonical, no echo,...) */
     newtio.c_lflag = 0;
 
@@ -680,55 +714,57 @@ llopen(linkLayer connectionParameters){
     if(connectionParameters.role==0)
     {
         (void) signal(SIGALRM, atende);  
-            alarm(connectionParameters.timeOut);                                        
-            SET(fd);
-
+            alarm(connectionParameters.timeOut);  
+            printf("Transmitter\n");   
+            printf("Envia SET\n");                                   
+            envia_set(fd);
+            printf("Ler UA recebido\n");
             while(tentativas<connectionParameters.numTries && STOP==FALSE){
-                        
-                res = read(fd,&valor_lido,1);         //Lê um caratér e envia para a máquina de estados verificar para que estado avança
+                   
+                res = read(fd,&valor_lido,1);         
                 if (res < 0) {
                     perror("Erro na leitura");
                     break;
                 }
                 
                 maquina_ua_open(valor_lido);
-                printf("Estado: %d\n",state);
+                printf("Estado maquina UA_open: %d\n",state);
                 if(state==MACHINE_STOP){
                     STOP=TRUE;
                     state=START;
-                    alarm(0);           
-                    envia_ua_close(fd);       
+                    //alarm(0);                 
                 }
-                else return -1;
+                
                 printf(":%x\n", valor_lido);                                     
             }
     }
-                     
     if(connectionParameters.role==1)
         {
+            printf("Receiver\n"); 
+            printf("Ler Set recebido\n");
             while(tentativas<connectionParameters.numTries && STOP==FALSE)
             {
-                
-            res = read(fd,&valor_lido,1);         //Lê um caratér e envia para a máquina de estados verificar para que estado avança
+            res = read(fd,&valor_lido,1);         
             if (res < 0) {
                 perror("Erro na leitura");
                 break;
             }
             maquina_set(valor_lido);
-            printf("Estado: %d\n",state);
+            printf("Estado da maquina SET: %d\n",state);
             if(state==MACHINE_STOP){
                 STOP=TRUE;
                 state=START;
             }
-            else return -1;
+            
             printf(":%x\n", valor_lido);                                    
-        }
-            //SET
-            maquina_ua_open(fd);
+            }
+            
+            printf("Envia UA_open\n");
+            envia_ua_open(fd);
         }
     if(tentativas==connectionParameters.numTries){
 
-        printf("Erro ao estabelecer a ligacao.\n")
+        printf("Erro ao estabelecer a ligacao.\n");
         return -1;
     }
     return 1;           
@@ -741,98 +777,236 @@ int llclose(linkLayer connectionParameters, int showStatistics){
     char valor_lido;                  
     STOP = FALSE;
     tentativas = 1;
-    fd = open(argv[1], O_RDWR | O_NOCTTY );
-    if (fd < 0) { 
-        perror(argv[1]); 
-        exit(-1); 
-        }
-    if(connectionParameters.role == 0){    
-        (void) signal(SIGALRM, atende);  
-        while(tentativas<connectionParameters.numTries && STOP==FALSE){                        
-            alarm(connectionParameters.timeOut);              
-            envia_DISC0(fd);
 
-            while(STOP==FALSE){
-                            
-                res = read(fd,&valor_lido,1);         
-                
+     if ((connectionParameters.serialPort == NULL) ||
+         ((strcmp("/dev/ttyS10", connectionParameters.serialPort)!=0) &&
+          (strcmp("/dev/ttyS11", connectionParameters.serialPort)!=0) )) {
+        printf("Usage:\tnserial SerialPort\n\tex: nserial /dev/ttyS1\n");
+        exit(NOT_DEFINED);      
+    }
+    
+    int fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY );
+    if (fd < 0) { 
+        perror(connectionParameters.serialPort); 
+        exit(-1); 
+    }
+
+    if(connectionParameters.role == 0){ 
+        
+        (void) signal(SIGALRM, atende);  
+        alarm(connectionParameters.timeOut);              
+        envia_DISC0(fd);
+        while(tentativas<connectionParameters.numTries && STOP==FALSE)
+        {                             
+            res = read(fd,&valor_lido,1);         
+            if (res < 0) {
+                    perror("Erro na leitura");
+                    break;
+            }
+            maquina_DISC_1(valor_lido);
+            printf("Estado maquina Disc_1: %d\n",state);
+            if(state==MACHINE_STOP){
+                STOP=TRUE;
+                state=START;    
+                alarm(0);           
+            } 
+        printf(":%x\n", valor_lido);                     
+        }
+        envia_ua_close(fd);
+    }
+
+    if(connectionParameters.role == 1){
+        printf("Recebe Disc_0\n");
+        while(tentativas<connectionParameters.numTries && STOP==FALSE)
+        {  
+            res = read(fd,&valor_lido,1);         
                 if (res < 0) {
                     perror("Erro na leitura");
                     break;
-                }
-                
-                maquina_DISC_1(valor_lido);
-                printf("Estado: %d\n",state);
-                if(state==MACHINE_STOP){
-                    STOP=TRUE;
-                    state=START;
-                    
-                    alarm(0);           
-                    
-                } 
-                printf(":%x\n", valor_lido);                
-               
-            }
-        }
-    }
-
-    STOP=FALSE;
-    if(connectionParameters.role == 1){
-        while(STOP==FALSE){
-                        
-            res = read(fd,&valor_lido,1);         
+                }       
             maquina_DISC_0(valor_lido);
-            printf("Estado: %d\n",state);
+            printf("Estado maquina Disc_0: %d\n",state);
             if(state==MACHINE_STOP){
                 STOP=TRUE;
                 state=START;
             } 
-            printf(":%x:%d\n", valor_lido, res);                
+            printf(":%x\n", valor_lido);                
         }
-
-
-        ////////////
-        (void) signal(SIGALRM, atende);  
-
-
-        while(tentativas<connectionParameters.numTries && STOP==FALSE){                        
-        ////////////        
-            alarm(connectionParameters.timeOut); 
-            maquina_DISC_1(fd);
-
-            while(STOP==FALSE){
-                            
-                res = read(fd,&valor_lido,1);         
-                if (res < 0) {
+        printf("Envia Disc_1\n");
+        envia_DISC1(fd);
+        printf("ler ua close\n");
+        while(tentativas<connectionParameters.numTries && STOP==FALSE)
+        {
+            res=read(fd,&valor_lido,1);
+             if (res < 0) {
                     perror("Erro na leitura");
                     break;
-                }
-                maquina_ua_close(valor_lido);
-                printf("STATE IS: %d\n",state);
-                if(state==STOP_STATE_MACHINE){
-                    STOP=TRUE;
-                    state=START;
-                    ///////////////
-                    alarm(0);           //Para parar o alarme
                 } 
-                printf(":%x:%d\n", valor_lido, res);                
-            }
+            maquina_ua_close(valor_lido);
+            printf("estado da maquina ua_close: %d\n",state);
+            if(state==MACHINE_STOP){
+                STOP=TRUE;
+                state=START;
+            } 
+            printf(":%x\n", valor_lido);
         }
+    
     }
     sleep(1);                         
     if(tentativas==connectionParameters.numTries){
 
-        printf("Erro ao fechar a ligacao.\n")
+        printf("Erro ao fechar a ligacao.\n");
         return -1;
     }
-    if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
-        perror("tcsetattr");
-        exit(-1);
-    }
-    close(fd);
-    return 1;    
+    return close(fd);    
 }
+
+
  llwrite(char* buf, int bufSize)
  {
-
+    int res;
+    char valor_lido;        //Para comportar os valores lidos da porta série
+    state = 0;              
+    STOP = FALSE;
+    //colocar fd
+    int fd; //= open(connectionParameters.serialPort, O_RDWR | O_NOCTTY );
+    envia_I_0(fd,buf,bufSize);
+    int tentativas=0;
+    int frameSize = 6+bufSize;
+    int currentTransmition = 0;
+    int reject = 0, accept = 0;
+     while (tentativas<3) { 
+        //alarmTriggered = FALSE;
+        //alarm(timeout);
+        reject = 0;
+        accept = 0;
+        while (!reject && !accept) {
+            
+            res=read(fd,&valor_lido,1);
+             if (res < 0) {
+                    perror("Erro na leitura");
+                    break;
+                } 
+            unsigned char result = maquina_para_todos(valor_lido);
+            printf("estado da maquina todos: %d\n",state);
+            if(state==MACHINE_STOP){
+                STOP=TRUE;
+                state=START;
+            } 
+            printf(":%x\n", valor_lido);
+           
+            if(!result){
+                continue;
+            }
+            else if(result == C_REJ0 || result == C_REJ1) {
+                reject = 1;
+            }
+            else if(result == C_RR0 || result == C_RR1) {
+                accept = 1;
+            }
+            else continue;
+        }
+        if (accept) break;
+        tentativas++;
+    }
+    if(accept) return frameSize;
+    else
+    {
+        return -1;
+    }    
  }
+ 
+ int llread(char *packet) {
+ 	return -1;
+  /
+    int res;
+    char valor_lido;       
+    state = 0;              
+    STOP = FALSE;
+    int tamanho= sizeof(packet);
+    int fd; //= open(connectionParameters.serialPort, O_RDWR | O_NOCTTY );
+    envia_RR_1(fd);
+    int tentativas=0;
+     int currentTransmition = 0;
+    int reject = 0, accept = 0;
+    
+     /*
+     while (tentativas<3) { 
+        
+        reject = 0;
+        accept = 0;
+        while (!reject && !accept) {
+            
+            res=read(fd,&valor_lido,1);
+             if (res < 0) {
+                    perror("Erro na leitura");
+                    break;
+                } 
+            unsigned char result = maquina_para_todos(valor_lido);
+            printf("estado da maquina todos: %d\n",state);
+            if(state==MACHINE_STOP){
+                STOP=TRUE;
+                state=START;
+            } 
+            printf(":%x\n", valor_lido);
+           
+            if(!result){
+                continue;
+            }
+            else if(result == C_REJ0 || result == C_REJ1) {
+                reject = 1;
+            }
+            else if(result == C_RR0 || result == C_RR1) {
+                accept = 1;
+            }
+            else continue;
+        }
+        if (accept) break;
+        tentativas++;
+    }
+    if(accept) return tamanho;
+    else
+    {
+        return -1;
+    } 
+     */
+      
+    while(STOP==FALSE)
+        {                             
+            res = read(fd,&packet,1);         
+            if (res < 0) {
+                    perror("Erro na leitura");
+                    break;
+            }
+            maquina_I0(packet);
+            printf("Estado maquina I0: %d\n",state);
+            if(state==MACHINE_STOP){
+                STOP=TRUE;
+                state=START;    
+                alarm(0);           
+            } 
+        printf(":%x\n", valor_lido);                     
+        }
+    envia_RR_1(fd);
+    while(STOP==FALSE)
+        {                             
+            res = read(fd,&packet,1);         
+            if (res < 0) {
+                    perror("Erro na leitura");
+                    break;
+            }
+            maquina_I1(packet);
+            printf("Estado maquina I1: %d\n",state);
+            if(state==MACHINE_STOP){
+                STOP=TRUE;
+                state=START;    
+                alarm(0);           
+            } 
+        printf(":%x\n", valor_lido);                     
+        }
+        envia_RR_0(fd);*/
+      return tamanho;
+ }
+ 
+ 
+ 
